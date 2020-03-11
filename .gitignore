@@ -1,0 +1,39 @@
+# dumb mac files
+**/.DS_Store
+
+# obj files
+*.o
+*.ko
+*.obj
+*.elf
+
+# libraries
+*.lib
+*.a
+*.la
+*.lo
+
+# precompiled headers
+*.gch
+*.pch
+
+# exec
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+
+# debug
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# shared objects
+*.dll
+*.dylib
+
+# builds
+**/results.txt
