@@ -6,134 +6,139 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <limits.h>
+#include <errno.h>
 
-/*
-	Alternate implementation of ls Unix command.
-	Takes path to directory that is to be listed
-	recurse_flag = true if user wishes to look at all files recursively
-*/
-
-void ls(char *path, bool recurse_flag) {
-	/* 
-	   path given no recursion
-	   iterates through all files in directory and prints their names
-	*/
-	if (path != NULL && !recurse_flag) {
-		struct dirent **namelist;
-		int n = scandir (path, &namelist, NULL, alphasort);
-		if (n < 0) {
-			perror("scan didn't work");
-		}
-		else {
-			for (int i = 0; i < n; i++) {
-				if (i >= 2) {
-					if ( (((namelist[i]->d_name)[0])- '.') != 0) {
-						printf("%s\n", namelist[i]->d_name);
-					}
-				}
-				free(namelist[i]);
-			}
-			free(namelist);
-		}
-	}
-	
-	//path not given no recursion
-	if (path == NULL && !recurse_flag) {
-		ls("./", false);
-	}
-	
-	/* 
-	   path given with recursion
-	   prints all files in directory
-	   if these files also happen to be directories,
-	   contents of subdirectories are also printed
-	*/
-	if (path != NULL && recurse_flag) {
-		printf("%s:\n\n", path);  
-	    
-		struct dirent **namelist;
-		int n = scandir (path, &namelist, NULL, alphasort);
-		if (n < 0) {
-			perror("scan didn't work");
-		}
-		else {
-			
-			//iterates through all files in directory and prints them
-			//doesn't recursively call ls again because dirent shouldn't be free'd 
-			//doesn't print dotfiles
-			for (int i = 2; i < n; i++) {
-				if ( (((namelist[i]->d_name)[0])- '.') != 0) {
-						printf("%s\n", namelist[i]->d_name);
-				}
-				
-				if (i == (n-1)) {
-					printf("%s", "\n");
-				}
-			}
-		
-			
-			/*
-				finds all files that are directories 
-				uses nextpath to store the pathname to these directories
-				recursively calls ls on all subdirectories using nextpath
-			*/
-			for (int i = 0; i < n; i++) {
-				if (i >= 2) {
-					//if file is a dotfile treat it as being hidden
-					if ( (((namelist[i]->d_name)[0])- '.') != 0) {
-					
-						//checks to prevent buffer overflow
-						
-						if ( strlen(path) + strlen(namelist[i]->d_name) + 1 > PATH_MAX) {
-							perror("path is too long\n");
-						}
-						
-					
-						char nextpath[PATH_MAX];
-						
-						//if path is ./ another slash being added would be invalid
-						strcpy(nextpath,path);
-						if ( strcmp(path,"./") != 0) {
-							strcat(nextpath,"/");
-						}
-						strcat(nextpath, namelist[i]->d_name);
-						struct stat stats;
-						
-						if ( stat(nextpath, &stats) == -1) {
-							perror("stat failed possibly dealing with a broken link\n");
-						}
-						if ( S_ISDIR(stats.st_mode)) {
-							ls(nextpath,true);
-						}
-					
-					}
-				}
-				free(namelist[i]);
-			}
-			free(namelist);
-		}
-	}
-	
-	//pathname not specified recursive flag is set to true
-	if (path == NULL && recurse_flag) {
-		ls("./" , true);
-	}
+void dir_cleanup(int num_files, struct dirent **files) {
+  for (int i = 0; i < num_files; ++i) {
+    free(files[i]);
+  }
+  free(files);
 }
 
-int main(int argc, char *argv[]){
 
-	if(argc < 2){ // No -R flag and no path name
-		ls(NULL, false);
-	}
-   	else if(strcmp(argv[1], "-R") == 0) {
-		if(argc == 2) { // only -R flag
-			ls(NULL, true);
-		} else { // -R flag with some path name
-			ls(argv[2], true);
-		}
-	}
-	else { // no -R flag but path name is given
-		ls(argv[1], false);
-	}
-	return 0;
+void subdir_cleanup(int num_subdirs, char** subdirs) {
+  for (int i = 0; i < num_subdirs; ++i) {
+    free(subdirs[i]);
+  }
+  free(subdirs);
+}
+
+/*
+Alternate implementation of ls Unix command.
+Takes path to directory that is to be listed
+recurse_flag is true if user wishes to look at all files recursively
+*/
+int ls(char *path, bool recurse_flag) {
+  // current directory
+  if (!path && !recurse_flag) {
+    return ls("./", false);
+  }
+  // recurse current directory
+  if (!path && recurse_flag) {
+    return ls("./" , true);
+  }
+
+  struct dirent **files;
+  int n = scandir(path, &files, NULL, alphasort);
+  if (n == -1) {
+    fprintf(stderr, "Unable to scan directory: %s: %s\n", path, strerror(errno));
+    return -1;
+  }
+
+  // iterates through all files in given directory and prints their names
+  if (path && !recurse_flag) {
+    while (--n) {
+      // ignore entries prefixed with '.'
+      if (((files[n]->d_name)[0] - '.') != 0) {
+        printf("%s\n", files[n]->d_name);
+      }
+      free(files[n]);
+    }
+    free(files);
+  }
+
+  // recurses through all present subdirectories
+  else if (path && recurse_flag) {
+    printf("%s:\n", path);
+
+    int num_subdirs = 0;
+    char **subdirs = malloc(sizeof(char*));
+    if (!subdirs) {
+      perror(NULL);
+      dir_cleanup(n, files);
+      return -1;
+    }
+    while (--n) {
+      if (((files[n]->d_name)[0] - '.') != 0) {
+        printf("%s\n", files[n]->d_name);
+
+        int is_dir = 0;
+        // check for d_type support
+        if (files[n]->d_type == DT_UNKNOWN && files[n]->d_type != DT_LNK) {
+          is_dir = (files[n]->d_type == DT_DIR);
+        }
+        else {
+          struct stat info;
+          stat(files[n]->d_name, &info);
+          is_dir = S_ISDIR(info.st_mode);
+        }
+        if (is_dir) {
+          char next_path[PATH_MAX];
+          strcpy(next_path, path);
+          // slash needed if path is not current directory
+          if (strncmp(path, "./", 2) != 0) {
+            strcat(next_path, "/");
+          }
+          strcat(next_path, files[n]->d_name);
+
+          subdirs[num_subdirs] = malloc(strlen(next_path) + 1);
+          if (!subdirs[num_subdirs]) {
+            perror(NULL);
+            dir_cleanup(n, files);
+            subdir_cleanup(num_subdirs, subdirs);
+            return -1;
+          }
+          strcat(subdirs[num_subdirs], next_path);
+          ++num_subdirs;
+          char **expanded_subdirs = realloc(subdirs, sizeof(subdirs) + sizeof(char*));
+          if (!expanded_subdirs) {
+            perror(NULL);
+            dir_cleanup(n, files);
+            subdir_cleanup(num_subdirs, subdirs);
+          }
+          subdirs = expanded_subdirs;
+        }
+      }
+      free(files[n]);
+    }
+    free(files);
+    printf("\n");
+
+    for (int i = 0; i < num_subdirs; ++i) {
+      ls(subdirs[i], true);
+      free(subdirs[i]);
+    }
+    free(subdirs);
+  }
+  return 0;
+}
+
+
+int main(int argc, char *argv[]){
+  int ret_val = 0;
+  if(argc < 2){ // No -R flag and no path name
+    ret_val = ls(NULL, false);
+  }
+  else if(strcmp(argv[1], "-R") == 0) {
+    if(argc == 2) { // only -R flag
+      ret_val = ls(NULL, true);
+    } 
+    else { // -R flag with some path name
+      ret_val = ls(argv[2], true);
+    }
+  }
+  else { // no -R flag but path name is given
+    ret_val = ls(argv[1], false);
+  }
+  return ret_val;
 }
