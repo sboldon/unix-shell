@@ -1,23 +1,30 @@
-all: shell.c parse-util.o util.o  build
-	gcc shell.c -o shell parse-util.o util.o
+ifeq ($(DEBUG), 1)
+	CFLAGS = -g -DDEBUG
+else
+	CLAGS = -DNDEBUG
+endif
 
-parse-util.o: parse-util.c util.h
-	gcc -c parse-util.c
+CC = gcc $(CFLAGS)
+OBJS = parse-util.o util.o
+EXEC = shell
 
-util.o: util.c util.h
-	gcc -c util.c
+all: $(EXEC)
+
+$(EXEC): shell.c $(OBJS) build
+	$(CC) -o $@ $< $(OBJS)
+
+$(OBJS): util.h
 
 build: ls wc cd
-	echo "Build completed"
 
-ls: ls.c
-	gcc ls.c -o ls
+ls: ls.c alloc_test.c alloc_test.h
+	$(CC) -o $@ $^
 
 wc: wc.c
-	gcc wc.c -o wc
+	$(CC) -o $@ $<
 
 cd: cd.c
-	gcc cd.c -o cd
+	$(CC) -o $@ $<
 
 clean:
 	rm -f *.o shell ls wc cd
